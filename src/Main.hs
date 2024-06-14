@@ -1,8 +1,8 @@
-module Main where
+module Main (main) where
 
 import Text.Parsec
 import Text.Parsec.String (Parser)
-import Data.List (intercalate)
+import Debug.Trace (trace)
 
 data Formula
     = Var String
@@ -27,31 +27,59 @@ expand F (And a b) = [Node F a [], Node F b []]
 expand V (Or a b) = [Node V a [], Node V b []]
 expand F (Or a b) = [Node F a [], Node F b []]
 expand V (Not a) = [Node F a []]
+expand F (Not (Implies a b)) = [Node V a [], Node F b []]
 expand F (Not a) = [Node V a []]
-expand _ (Var _) = []
+expand lbl (Var x) = [Leaf lbl (Var x)]
 
 buildTableaux :: Label -> Formula -> Tableaux
-buildTableaux label formula = build (Node label formula [])
+buildTableaux lbl formula = trace ("Building tableaux for " ++ show lbl ++ ": " ++ show formula) $
+    case expand lbl formula of
+        [] -> Leaf lbl formula
+        children -> Node lbl formula (map build children)
   where
-    build node@(Leaf _ _) = node
-    build (Node lbl frm children) =
-        let newChildren = expand lbl frm
-        in Node lbl frm (map build newChildren)
+    build (Node l f _) = buildTableaux l f
+    build (Leaf l f) = Leaf l f
 
 isContradiction :: [Tableaux] -> Bool
 isContradiction [] = False
-isContradiction (Leaf V (Var x) : rest) = any (\(Leaf F (Var y)) -> x == y) rest || isContradiction rest
-isContradiction (Leaf F (Var x) : rest) = any (\(Leaf V (Var y)) -> x == y) rest || isContradiction rest
+isContradiction (Leaf V (Var x) : rest) =
+    trace ("Checking contradiction for V: " ++ x) $
+    any (\t -> case t of
+                 Leaf F (Var y) -> trace ("Found F: " ++ y) $ x == y
+                 _ -> False) rest || isContradiction rest
+isContradiction (Leaf F (Var x) : rest) =
+    trace ("Checking contradiction for F: " ++ x) $
+    any (\t -> case t of
+                 Leaf V (Var y) -> trace ("Found V: " ++ y) $ x == y
+                 _ -> False) rest || isContradiction rest
+isContradiction (Node _ _ children : rest) = isContradiction (children ++ rest)
 isContradiction (_:rest) = isContradiction rest
 
-isTautology :: Tableaux -> Bool
-isTautology tableaux = not (isContradiction (flatten tableaux))
-  where
-    flatten (Leaf lbl frm) = [Leaf lbl frm]
-    flatten (Node _ _ children) = concatMap flatten children
+checkBranch :: [Tableaux] -> Bool
+checkBranch [] = False
+checkBranch (Leaf V (Var x) : rest) =
+    trace ("Checking branch for V: " ++ x) $
+    any (\t -> case t of
+                 Leaf F (Var y) -> trace ("Found F in branch: " ++ y) $ x == y
+                 _ -> False) rest || checkBranch rest
+checkBranch (Leaf F (Var x) : rest) =
+    trace ("Checking branch for F: " ++ x) $
+    any (\t -> case t of
+                 Leaf V (Var y) -> trace ("Found V in branch: " ++ y) $ x == y
+                 _ -> False) rest || checkBranch rest
+checkBranch (Node _ _ children : rest) = checkBranch (children ++ rest)
+checkBranch (_:rest) = checkBranch rest
 
-parseFormula :: Parser Formula
-parseFormula = parseImplies
+isTautology :: Tableaux -> Bool
+isTautology tableaux = trace ("Checking if tableaux is a tautology") $
+    allBranchesContainContradiction (branches tableaux)
+  where
+    branches :: Tableaux -> [[Tableaux]]
+    branches (Leaf lbl frm) = [[Leaf lbl frm]]
+    branches (Node lbl frm children) = concatMap branches children
+
+    allBranchesContainContradiction :: [[Tableaux]] -> Bool
+    allBranchesContainContradiction = all (\branch -> isContradiction branch || checkBranch branch)
 
 parseImplies :: Parser Formula
 parseImplies = try (do
@@ -62,32 +90,26 @@ parseImplies = try (do
   <|> parseOr
 
 parseOr :: Parser Formula
-parseOr = try (do
-    left <- parseAnd
-    _ <- string "|"
-    right <- parseOr
-    return (Or left right))
-  <|> parseAnd
+parseOr = chainl1 parseAnd (spaces *> char '|' *> spaces *> return Or)
 
 parseAnd :: Parser Formula
-parseAnd = try (do
-    left <- parseNot
-    _ <- string "&"
-    right <- parseAnd
-    return (And left right))
-  <|> parseNot
+parseAnd = chainl1 parseNot (spaces *> char '&' *> spaces *> return And)
 
 parseNot :: Parser Formula
-parseNot = try (do
-    _ <- string "~"
-    Not <$> parseNot)
-  <|> parseVar
+parseNot = (spaces *> char '~' *> spaces *> parseNot >>= \f -> return (Not f))
+  <|> parseParen
+
+parseParen :: Parser Formula
+parseParen = between (char '(' *> spaces) (spaces *> char ')') parseExpr <|> parseVar
 
 parseVar :: Parser Formula
 parseVar = Var <$> many1 letter
 
+parseExpr :: Parser Formula
+parseExpr = parseImplies
+
 parseFormulaFromString :: String -> Either ParseError Formula
-parseFormulaFromString = parse parseFormula ""
+parseFormulaFromString = parse (spaces *> parseExpr <* spaces <* eof) ""
 
 printTableaux :: Tableaux -> String
 printTableaux tableaux = unlines (printTableaux' "" tableaux)
