@@ -4,6 +4,8 @@ import Text.Parsec
 import Text.Parsec.String (Parser)
 import Debug.Trace (trace)
 
+#tipos de formula 
+
 data Formula
     = Var String
     | Not Formula
