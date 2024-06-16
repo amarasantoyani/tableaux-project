@@ -2,9 +2,6 @@ module Main (main) where
 
 import Text.Parsec
 import Text.Parsec.String (Parser)
-import Debug.Trace (trace)
-
-#tipos de formula 
 
 data Formula
     = Var String
@@ -30,11 +27,13 @@ expand V (Or a b) = [Node V a [], Node V b []]
 expand F (Or a b) = [Node F a [], Node F b []]
 expand V (Not a) = [Node F a []]
 expand F (Not (Implies a b)) = [Node V a [], Node F b []]
+expand F (Not (And a b)) = [Node V (Not a) [], Node V (Not b) []]
+expand F (Not (Or a b)) = [Node V (Not a) [], Node V (Not b) []]
 expand F (Not a) = [Node V a []]
 expand lbl (Var x) = [Leaf lbl (Var x)]
 
 buildTableaux :: Label -> Formula -> Tableaux
-buildTableaux lbl formula = trace ("Building tableaux for " ++ show lbl ++ ": " ++ show formula) $
+buildTableaux lbl formula = 
     case expand lbl formula of
         [] -> Leaf lbl formula
         children -> Node lbl formula (map build children)
@@ -45,14 +44,12 @@ buildTableaux lbl formula = trace ("Building tableaux for " ++ show lbl ++ ": " 
 isContradiction :: [Tableaux] -> Bool
 isContradiction [] = False
 isContradiction (Leaf V (Var x) : rest) =
-    trace ("Checking contradiction for V: " ++ x) $
     any (\t -> case t of
-                 Leaf F (Var y) -> trace ("Found F: " ++ y) $ x == y
+                 Leaf F (Var y) -> x == y
                  _ -> False) rest || isContradiction rest
 isContradiction (Leaf F (Var x) : rest) =
-    trace ("Checking contradiction for F: " ++ x) $
     any (\t -> case t of
-                 Leaf V (Var y) -> trace ("Found V: " ++ y) $ x == y
+                 Leaf V (Var y) -> x == y
                  _ -> False) rest || isContradiction rest
 isContradiction (Node _ _ children : rest) = isContradiction (children ++ rest)
 isContradiction (_:rest) = isContradiction rest
@@ -60,20 +57,18 @@ isContradiction (_:rest) = isContradiction rest
 checkBranch :: [Tableaux] -> Bool
 checkBranch [] = False
 checkBranch (Leaf V (Var x) : rest) =
-    trace ("Checking branch for V: " ++ x) $
     any (\t -> case t of
-                 Leaf F (Var y) -> trace ("Found F in branch: " ++ y) $ x == y
+                 Leaf F (Var y) -> x == y
                  _ -> False) rest || checkBranch rest
 checkBranch (Leaf F (Var x) : rest) =
-    trace ("Checking branch for F: " ++ x) $
     any (\t -> case t of
-                 Leaf V (Var y) -> trace ("Found V in branch: " ++ y) $ x == y
+                 Leaf V (Var y) -> x == y
                  _ -> False) rest || checkBranch rest
 checkBranch (Node _ _ children : rest) = checkBranch (children ++ rest)
 checkBranch (_:rest) = checkBranch rest
 
 isTautology :: Tableaux -> Bool
-isTautology tableaux = trace ("Checking if tableaux is a tautology") $
+isTautology tableaux =
     allBranchesContainContradiction (branches tableaux)
   where
     branches :: Tableaux -> [[Tableaux]]
@@ -132,7 +127,6 @@ main = do
                 Left err -> print err
                 Right formula -> do
                     let tableaux = buildTableaux F formula
-                    putStrLn "Árvore de prova/refutação:"
                     putStrLn (printTableaux tableaux)
                     if isTautology tableaux
                         then putStrLn "A fórmula é uma tautologia."
