@@ -1,4 +1,4 @@
-# tableaux-project
+# tableaux-project in haskell programming language
 
 Os operadores são representados por:
 1. & para a conjunção (AND),
