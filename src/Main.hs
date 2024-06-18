@@ -19,12 +19,12 @@ data Tableaux
     deriving (Eq, Show)
 
 expand :: Label -> Formula -> [Tableaux]
-expand V (Implies a b) = [Node F a [], Node V b []]
+expand V (Implies a b) = [Node F a [Node V b []]]
 expand F (Implies a b) = [Node V a [], Node F b []]
-expand V (And a b) = [Node V a [], Node V b []]
+expand V (And a b) = [Node V a [Node V b []]]
 expand F (And a b) = [Node F a [], Node F b []]
 expand V (Or a b) = [Node V a [], Node V b []]
-expand F (Or a b) = [Node F a [], Node F b []]
+expand F (Or a b) = [Node F a [Node F b []]]
 expand V (Not a) = [Node F a []]
 expand F (Not (Implies a b)) = [Node V a [], Node F b []]
 expand F (Not (And a b)) = [Node V (Not a) [], Node V (Not b) []]
@@ -33,11 +33,25 @@ expand F (Not a) = [Node V a []]
 expand lbl (Var x) = [Leaf lbl (Var x)]
 
 buildTableaux :: Label -> Formula -> Tableaux
-buildTableaux lbl formula = 
-    case expand lbl formula of
-        [] -> Leaf lbl formula
-        children -> Node lbl formula (map build children)
+buildTableaux lbl formula = case formula of
+    Implies a b -> 
+        if lbl == F
+        then Node lbl formula [buildTableaux V a, buildTableaux F b]  -- Corrigindo a expansão para F
+        else Node lbl formula [buildTableaux F a, buildTableaux V b]  -- Corrigindo a expansão para V
+    And a b ->
+        if lbl == F
+        then Node lbl formula [buildTableaux F a, buildTableaux F b]  -- Corrigindo a expansão para F
+        else Node lbl formula [buildTableaux V a, buildTableaux V b]  -- Corrigindo a expansão para V
+    Or a b ->
+        if lbl == F
+        then Node lbl formula [buildTableaux F a, buildTableaux F b]  -- Corrigindo a expansão para F
+        else Node lbl formula [buildTableaux V a, buildTableaux V b]  -- Corrigindo a expansão para V
+    Not a ->
+        Node lbl formula [buildTableaux (flipLabel lbl) a]
+    Var x -> Leaf lbl (Var x)
   where
+    flipLabel V = F
+    flipLabel F = V
     build (Node l f _) = buildTableaux l f
     build (Leaf l f) = Leaf l f
 
