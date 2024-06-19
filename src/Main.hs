@@ -16,6 +16,8 @@ data Label = V | F deriving (Eq, Show)
 data Tableaux
     = Leaf Label Formula
     | Node Label Formula [Tableaux]
+    | Contracted [Tableaux]
+    | Null
     deriving (Eq, Show)
 
 expand :: Label -> Formula -> [Tableaux]
@@ -32,28 +34,46 @@ expand F (Not (Or a b)) = [Node V (Not a) [], Node V (Not b) []]
 expand F (Not a) = [Node V a []]
 expand lbl (Var x) = [Leaf lbl (Var x)]
 
-buildTableaux :: Label -> Formula -> Tableaux
-buildTableaux lbl formula = case formula of
+buildTableaux :: Label -> Formula -> Tableaux -> Tableaux
+buildTableaux lbl formula Null = case formula of
     Implies a b -> 
         if lbl == F
-        then Node lbl formula [buildTableaux V a, buildTableaux F b]  -- Corrigindo a expansão para F
-        else Node lbl formula [buildTableaux F a, buildTableaux V b]  -- Corrigindo a expansão para V
+        then Node lbl formula [buildTableaux V a (buildTableaux F b Null)]  -- Corrigindo a expansão para F
+        else Node lbl formula [buildTableaux F a Null, buildTableaux V b Null]  -- Corrigindo a expansão para V
     And a b ->
         if lbl == F
-        then Node lbl formula [buildTableaux F a, buildTableaux F b]  -- Corrigindo a expansão para F
-        else Node lbl formula [buildTableaux V a, buildTableaux V b]  -- Corrigindo a expansão para V
+        then Node lbl formula [buildTableaux F a Null, buildTableaux F b Null]  -- Corrigindo a expansão para F
+        else Node lbl formula [buildTableaux V a (buildTableaux V b Null)]  -- Corrigindo a expansão para V
     Or a b ->
         if lbl == F
-        then Node lbl formula [buildTableaux F a, buildTableaux F b]  -- Corrigindo a expansão para F
-        else Node lbl formula [buildTableaux V a, buildTableaux V b]  -- Corrigindo a expansão para V
+        then Node lbl formula [buildTableaux F a (buildTableaux F b Null)]  -- Corrigindo a expansão para F
+        else Node lbl formula [buildTableaux V a Null, buildTableaux V b Null]  -- Corrigindo a expansão para V
     Not a ->
-        Node lbl formula [buildTableaux (flipLabel lbl) a]
+        Node lbl formula [buildTableaux (flipLabel lbl) a Null]
     Var x -> Leaf lbl (Var x)
   where
     flipLabel V = F
     flipLabel F = V
-    build (Node l f _) = buildTableaux l f
-    build (Leaf l f) = Leaf l f
+
+buildTableaux lbl formula tab = case formula of
+    Implies a b -> 
+        if lbl == F
+        then Node lbl formula (tab:[buildTableaux V a (buildTableaux F b Null)])  -- Corrigindo a expansão para F
+        else Node lbl formula (tab:[buildTableaux F a Null, buildTableaux V b Null])  -- Corrigindo a expansão para V
+    And a b ->
+        if lbl == F
+        then Node lbl formula (tab:[buildTableaux F a Null, buildTableaux F b Null])  -- Corrigindo a expansão para F
+        else Node lbl formula (tab:[buildTableaux V a (buildTableaux V b Null)])  -- Corrigindo a expansão para V
+    Or a b ->
+        if lbl == F
+        then Node lbl formula (tab:[buildTableaux F a (buildTableaux F b Null)])  -- Corrigindo a expansão para F
+        else Node lbl formula (tab:[buildTableaux V a Null, buildTableaux V b Null])  -- Corrigindo a expansão para V
+    Not a ->
+        Node lbl formula (tab:[buildTableaux (flipLabel lbl) a Null])
+    Var x -> Contracted [Leaf lbl (Var x), tab]
+  where
+    flipLabel V = F
+    flipLabel F = V
 
 isContradiction :: [Tableaux] -> Bool
 isContradiction [] = False
@@ -68,29 +88,30 @@ isContradiction (Leaf F (Var x) : rest) =
 isContradiction (Node _ _ children : rest) = isContradiction (children ++ rest)
 isContradiction (_:rest) = isContradiction rest
 
-checkBranch :: [Tableaux] -> Bool
-checkBranch [] = False
-checkBranch (Leaf V (Var x) : rest) =
-    any (\t -> case t of
-                 Leaf F (Var y) -> x == y
-                 _ -> False) rest || checkBranch rest
-checkBranch (Leaf F (Var x) : rest) =
-    any (\t -> case t of
-                 Leaf V (Var y) -> x == y
-                 _ -> False) rest || checkBranch rest
-checkBranch (Node _ _ children : rest) = checkBranch (children ++ rest)
-checkBranch (_:rest) = checkBranch rest
+f1 :: Tableaux -> Bool
+f1 (Node l f children) = f3 (f2 children [])
 
-isTautology :: Tableaux -> Bool
-isTautology tableaux =
-    allBranchesContainContradiction (branches tableaux)
-  where
-    branches :: Tableaux -> [[Tableaux]]
-    branches (Leaf lbl frm) = [[Leaf lbl frm]]
-    branches (Node lbl frm children) = concatMap branches children
+f2 :: [Tableaux] -> [Tableaux] -> [[Tableaux]]
+f2 (start:rest) tab = case start of 
+    Node _ _ (s:r) -> ((f2 [s] tab) ++ (f2 r tab))
+    Contracted (s:r) -> f2 r (s:tab)
+    Leaf l f -> f2 rest ((Leaf l f):tab)
+f2 [] tab = [tab, []]
 
-    allBranchesContainContradiction :: [[Tableaux]] -> Bool
-    allBranchesContainContradiction = all (\branch -> isContradiction branch || checkBranch branch)
+f3 :: [[Tableaux]] -> Bool
+f3 (start: rest) = (f4 start) && (f3 rest)
+f3 [[]] = True
+
+f4:: [Tableaux] -> Bool
+f4 (start:rest) = (f5 start rest) || (f4 rest)
+f4 [] = False
+
+f5:: Tableaux -> [Tableaux] -> Bool
+f5 (Leaf V (Var x)) ((Leaf F (Var y)):rest) = (x==y) || (f5 (Leaf V (Var x)) rest)
+f5 (Leaf F (Var x)) ((Leaf V (Var y)):rest) = (x==y) || (f5 (Leaf F (Var x)) rest)
+f5 (Leaf F (Var x)) ((Leaf F (Var y)):rest) = (f5 (Leaf F (Var x)) rest)
+f5 (Leaf V (Var x)) ((Leaf V (Var y)):rest) = (f5 (Leaf V (Var x)) rest)
+f5 _ [] = False
 
 parseImplies :: Parser Formula
 parseImplies = try (do
@@ -129,6 +150,7 @@ printTableaux tableaux = unlines (printTableaux' "" tableaux)
     printTableaux' prefix (Leaf lbl frm) = [prefix ++ show lbl ++ ": " ++ show frm]
     printTableaux' prefix (Node lbl frm children) =
       (prefix ++ show lbl ++ ": " ++ show frm) : concatMap (printTableaux' (prefix ++ "  ")) children
+    printTableaux' prefix (Contracted children) = concatMap (printTableaux' prefix) children
 
 main :: IO ()
 main = do
@@ -140,9 +162,9 @@ main = do
             case parseFormulaFromString input of
                 Left err -> print err
                 Right formula -> do
-                    let tableaux = buildTableaux F formula
+                    let tableaux = buildTableaux F formula Null
                     putStrLn (printTableaux tableaux)
-                    if isTautology tableaux
+                    if f1 tableaux
                         then putStrLn "A fórmula é uma tautologia."
                         else putStrLn "A fórmula é falsificável."
             main
