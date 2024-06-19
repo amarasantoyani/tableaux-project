@@ -20,20 +20,6 @@ data Tableaux
     | Null
     deriving (Eq, Show)
 
-expand :: Label -> Formula -> [Tableaux]
-expand V (Implies a b) = [Node F a [Node V b []]]
-expand F (Implies a b) = [Node V a [], Node F b []]
-expand V (And a b) = [Node V a [Node V b []]]
-expand F (And a b) = [Node F a [], Node F b []]
-expand V (Or a b) = [Node V a [], Node V b []]
-expand F (Or a b) = [Node F a [Node F b []]]
-expand V (Not a) = [Node F a []]
-expand F (Not (Implies a b)) = [Node V a [], Node F b []]
-expand F (Not (And a b)) = [Node V (Not a) [], Node V (Not b) []]
-expand F (Not (Or a b)) = [Node V (Not a) [], Node V (Not b) []]
-expand F (Not a) = [Node V a []]
-expand lbl (Var x) = [Leaf lbl (Var x)]
-
 buildTableaux :: Label -> Formula -> Tableaux -> Tableaux
 buildTableaux lbl formula Null = case formula of
     Implies a b -> 
@@ -72,46 +58,46 @@ buildTableaux lbl formula tab = case formula of
         Node lbl formula (tab:[buildTableaux (flipLabel lbl) a Null])
     Var x -> Contracted [Leaf lbl (Var x), tab]
   where
-    flipLabel V = F
+    flipLabel V = F --inverte v or f e f por v
     flipLabel F = V
 
-isContradiction :: [Tableaux] -> Bool
-isContradiction [] = False
-isContradiction (Leaf V (Var x) : rest) =
-    any (\t -> case t of
-                 Leaf F (Var y) -> x == y
-                 _ -> False) rest || isContradiction rest
-isContradiction (Leaf F (Var x) : rest) =
-    any (\t -> case t of
-                 Leaf V (Var y) -> x == y
-                 _ -> False) rest || isContradiction rest
-isContradiction (Node _ _ children : rest) = isContradiction (children ++ rest)
-isContradiction (_:rest) = isContradiction rest
+isTautology :: Tableaux -> Bool --usa allBranchesContainContradiction para verificar se todos os ramos derivados do tableaux contêm uma contradição
+isTautology (Node l f children) = checkBranches (accumulateBranches children []) 
 
-f1 :: Tableaux -> Bool
-f1 (Node l f children) = f3 (f2 children [])
+accumulateBranches :: [Tableaux] -> [Tableaux] -> [[Tableaux]]
+accumulateBranches (start:rest) tab = case start of 
+    Node _ _ (s:r) -> ((accumulateBranches r (s:tab)) ++ (accumulateBranches rest tab))
+    Contracted (s:r) -> (accumulateBranches r ((s:r)++tab)) ++ (accumulateBranches rest tab)
+    Leaf l f -> (accumulateBranches [] ((Leaf l f):tab)) ++ (accumulateBranches rest tab)
+accumulateBranches [] tab = [tab, []]
 
-f2 :: [Tableaux] -> [Tableaux] -> [[Tableaux]]
-f2 (start:rest) tab = case start of 
-    Node _ _ (s:r) -> ((f2 [s] tab) ++ (f2 r tab))
-    Contracted (s:r) -> f2 r (s:tab)
-    Leaf l f -> f2 rest ((Leaf l f):tab)
-f2 [] tab = [tab, []]
+checkBranches :: [[Tableaux]] -> Bool -- processa múltiplos ramos e verifica se todos eles são contraditórios usando a função checkBranch
+checkBranches (start: rest) = (checkBranch start True) && (checkBranches rest)
+checkBranches [[]] = True
+checkBranches [] = True
 
-f3 :: [[Tableaux]] -> Bool
-f3 (start: rest) = (f4 start) && (f3 rest)
-f3 [[]] = True
+checkBranch:: [Tableaux] -> Bool -> Bool -- analisa um único ramo e utiliza a função hasContradiction para verificar a existência de contradições dentro dele.
+checkBranch (start:rest) v = (hasContradiction start rest) || (checkBranch rest False)
+checkBranch [] v = v
 
-f4:: [Tableaux] -> Bool
-f4 (start:rest) = (f5 start rest) || (f4 rest)
-f4 [] = False
+hasContradiction:: Tableaux -> [Tableaux] -> Bool --verifica se há contradições diretas entre folhas (Leaf) que afirmam e negam 
+                                                   -- a mesma variável ou entre nós (Node) que representam operações contraditórias sobre a mesma fórmula
+hasContradiction tab (start:rest) = case tab of
+    Leaf V (Var x) -> case start of
+        Leaf F (Var y) -> x==y
+        _ -> False || (hasContradiction tab rest)
+    Leaf F (Var x) -> case start of
+        Leaf V (Var y) -> x==y
+        _ -> False || (hasContradiction tab rest)
+    Node V f _ -> case start of
+        Node F g _ -> f==g
+        _ -> False || (hasContradiction tab rest)
+    Node F f _ -> case start of 
+        Node V g _ -> f==g
+        _ -> False || (hasContradiction tab rest)
+    Contracted _ -> False
 
-f5:: Tableaux -> [Tableaux] -> Bool
-f5 (Leaf V (Var x)) ((Leaf F (Var y)):rest) = (x==y) || (f5 (Leaf V (Var x)) rest)
-f5 (Leaf F (Var x)) ((Leaf V (Var y)):rest) = (x==y) || (f5 (Leaf F (Var x)) rest)
-f5 (Leaf F (Var x)) ((Leaf F (Var y)):rest) = (f5 (Leaf F (Var x)) rest)
-f5 (Leaf V (Var x)) ((Leaf V (Var y)):rest) = (f5 (Leaf V (Var x)) rest)
-f5 _ [] = False
+hasContradiction _ [] = False
 
 parseImplies :: Parser Formula
 parseImplies = try (do
@@ -164,7 +150,7 @@ main = do
                 Right formula -> do
                     let tableaux = buildTableaux F formula Null
                     putStrLn (printTableaux tableaux)
-                    if f1 tableaux
+                    if isTautology tableaux
                         then putStrLn "A fórmula é uma tautologia."
                         else putStrLn "A fórmula é falsificável."
             main
